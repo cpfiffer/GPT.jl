@@ -182,4 +182,51 @@ function find_stop_index(completion, n_stop_tokens::Int=1)
     end
 end
 
+function embed(
+    text;
+    endpoint::String = "https://api.openai.com/v1/embeddings",
+    model::String = "text-embedding-ada-002",
+    api_key::String = lookup_openai_api_key(),
+    organization::String = lookup_openai_organization(),
+    n_retries::Int = 10,
+    temperature::Real = 1.0,
+    max_tokens::Int = 1024,
+    logprobs::Union{Nothing,Int} = 0,
+    echo::Bool = false,
+    stop::Union{Nothing,String} = nothing,
+    verbose::Bool = false,
+    logit_bias::Union{Dict,Nothing} = nothing,
+    options... # Other options
+)
+    # Construct HTTP request headers and body
+    headers = ["Content-Type" => "application/json",
+               "Authorization" => "Bearer $api_key",
+               "OpenAI-Organization" => organization]
+    body = Dict{String,Any}(
+        "input" => text,
+        # "n" => n_completions,
+        "model" => model,
+        # "temperature" => temperature,
+        # "max_tokens" => max_tokens,
+        # "logprobs" => logprobs,
+        # "echo" => echo,
+        # "stop" => stop,
+        options...
+    )
+    if !isnothing(logit_bias)
+        body["logit_bias"] = logit_bias
+    end
+    body = JSON3.write(body)
+    # Post request with exponential backoff
+    if verbose println("Posting HTTP request...") end
+    delays = ExponentialBackOff(n=n_retries, first_delay=0.5, max_delay=60.0,
+                                factor=2.0, jitter=0.1)
+    request = Base.retry(delays=delays,
+                         check=(_, e) -> HTTP.RetryRequest.isrecoverable(e)) do
+        HTTP.post(endpoint, headers, body, retry=false)
+    end
+    response = request()
+    return JSON3.read(response.body)
+end
+
 end # module
